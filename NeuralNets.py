@@ -131,38 +131,41 @@ class FullyConnected(NN):
     
 
 
-    def clip_gradients(self, threshold=3,clip_start=100,print_if_clipped= True):
+    def clip_gradients(self, threshold=3,clip_start=3000,print_if_clipped= False):
         ## Uses gradient norm within 3 standard deviations
         ## here, threshold represents the number of standard devations from the mean
 
         ## needed to gather samples before we clip
-        print_flag = False
+        
         if self.n <clip_start:
             return
         for key in self.gradients.keys():
+            print_flag = False
             if key !="bias" and key !="weights":
                 norm = np.linalg.norm(self.gradients[key])
+                #print(key,norm)
                 if norm > self.get_clip_mean(key) + threshold* self.get_clip_stddev(key):
                     self.gradients[key] = self.get_clip_mean(key)*(self.gradients[key]/norm)
                     print_flag = True
             elif key=="bias":
                 for i in range(self.HiddenDim):
                     norm = np.linalg.norm(self.gradients[key][:,i])
+                    #print(key,norm)
                     if norm > self.get_clip_mean(key)[i] + threshold* self.get_clip_stddev(key)[i]:
                         self.gradients[key][:,i] = self.get_clip_mean(key)[i]*(self.gradients[key][:,i]/norm)
                         print_flag = True
             else:
                 for i in range(self.HiddenDim):
+                    #print(key,norm)
                     norm = np.linalg.norm(self.gradients[key][:,:,i],"fro")
                     if norm > self.get_clip_mean(key)[i] + threshold* self.get_clip_stddev(key)[i]:
                         self.gradients[key][:,:,i] = self.get_clip_mean(key)[i]*(self.gradients[key][:,:,i]/norm)
                         print_flag = True
-        if print_flag and print_if_clipped:
-            print("Gradient has been clipped! \n")
+            if print_flag and print_if_clipped:
+                print(f"Gradient {key} has been clipped! ---- Norm: {norm}, Mean: {self.mean[key]}, Stddev: {self.get_clip_stddev(key)}")
 
 
-
-
+    
 
         
     def zero_gradient(self):
@@ -218,11 +221,13 @@ class FullyConnected(NN):
             self.updateSampleWeights()
         
         self.zero_grad_samples()
-    def updateSampleWeights(self):
+    def updateSampleWeights(self, include_bias = False):
         for key in self.gradients_sample.keys():
             gradient_sample = self.gradients_sample[key]
             if key=="input_bias":
                 gradient_sample = gradient_sample.T
+            if (key=="bias" or key=="output_bias") and include_bias:
+                continue 
             self.gradients[key] += gradient_sample/self.minibatch_sz
 
 
@@ -230,13 +235,15 @@ class FullyConnected(NN):
         
         
 
-    def updateWeights(self,lr = .001,alg = "SGD",beta1 = .9,beta2 = .999,epsilon=1e-8):
-        self.clip_gradients()
+    def updateWeights(self,lr = .001,alg = "SGD",clip_gradients= False):
+        if clip_gradients:
+            self.clip_gradients()
         if alg == "SGD":
             self.SGD(lr = lr)
         if alg == "ADAM":
             self.ADAM(lr = .001,beta1 = .9,beta2 = .999,epsilon=1e-8)
-        self.update_clip_metrics()
+        if clip_gradients:
+            self.update_clip_metrics()
         self.zero_gradient()
         
 
@@ -357,6 +364,7 @@ class FullyConnected(NN):
 ##########################################################
 #                   MISC
 ##########################################################
+
 ## Gradient clipping functions
     def update_clip_metrics(self,matrix_norm = "fro",vector_norm=2):
         self.n += 1
@@ -367,6 +375,7 @@ class FullyConnected(NN):
                 self.mean[key] += delta / self.n
                 delta2 = norm - self.mean[key]
                 self.M2[key] += delta * delta2
+            
             elif key=="weights":
                 for i in range(self.HiddenDim):
                     norm = np.linalg.norm(self.gradients[key][:,:,i],matrix_norm)
@@ -381,6 +390,7 @@ class FullyConnected(NN):
                     self.mean[key][i] += delta / self.n
                     delta2 = norm - self.mean[key][i]
                     self.M2[key][i] += delta * delta2
+            #print("saved_val: ",key,norm)
 
                     
 
@@ -406,6 +416,16 @@ def save_state(object,file_name,directory="/checkpoints"):
 def load_state(file_path):
     with open(file_path, 'rb') as file:
         return pickle.load(file)
+# Returns percent error 
+@staticmethod
+def validate_data(y_pred,yactual):
+    count = 0
+    for i in range(len(y_pred)):
+        if np.argmax(y_pred[i])==np.argmax(yactual[i]):
+            count+=1
+    return 100*(count/len(y_pred))
+    
+
 
 
 
