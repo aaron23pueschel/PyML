@@ -22,15 +22,15 @@ import torch.nn.functional as fn
 class NeuralNetwork(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim):
         super(NeuralNetwork, self).__init__()
-        self.layer1 = nn.Linear(input_dim, 500,bias=False)
+        self.layer1 = nn.Linear(input_dim, hidden_dim,bias=False)
         self.act1 = nn.SiLU()
-        self.layer2 = nn.Linear(500, 300,bias=False)
+        self.layer2 = nn.Linear(hidden_dim, hidden_dim,bias=False)
         self.act2 = nn.SiLU()
-        self.layer3 = nn.Linear(300, 100,bias=False)
+        self.layer3 = nn.Linear(hidden_dim, hidden_dim,bias=False)
         self.act3 = nn.SiLU()
-        self.layer4 = nn.Linear(100, 30,bias=False)
+        self.layer4 = nn.Linear(hidden_dim, hidden_dim,bias=False)
         self.act4 = nn.SiLU()
-        self.out_layer = nn.Linear(30,output_dim,bias=False)
+        self.out_layer = nn.Linear(hidden_dim,output_dim,bias=False)
 
         
 

@@ -7,7 +7,7 @@ class NN(object):
         self.name = name
 
 class FullyConnected(NN):
-    def __init__(self,inputDim,outputDim,NPL,HiddenDim,minibatch_sz, activation_fcn="SiLU",cost_func="MSE", optimizer="SGD",classifier=False):
+    def __init__(self,inputDim,outputDim,NPL,HiddenDim,minibatch_sz, activation_fcn="SiLU",cost_func="MSE", optimizer="SGD",classifier=False,dtype_ = np.float32, use_tensors=True):
         super().__init__()
         self.inputDim = inputDim
         self.outputDim = outputDim
@@ -17,6 +17,8 @@ class FullyConnected(NN):
         self.activation_fcn=activation_fcn
         self.optimizer = optimizer
         self.classifier = classifier
+        self.dtype_ = dtype_
+        self.use_tensors = use_tensors
 
         self.parameters = dict()
         self.gradients = dict()
@@ -51,7 +53,7 @@ class FullyConnected(NN):
 
     def init_weights(self):
         self.parameters = {
-            "weights_in": (np.random.randn(self.inputDim, self.NPL) * np.sqrt(1.0 / self.inputDim)).T,
+            "weights_in": ((np.random.randn(self.inputDim, self.NPL) * np.sqrt(1.0 / self.inputDim)).T).astype(dtype=self.dtype_),
             "weights": np.random.randn(self.NPL, self.NPL, self.HiddenDim) * np.sqrt(2.0 / self.NPL),
             "weights_out": (np.random.randn(self.NPL, self.outputDim) * np.sqrt(1.0 / self.NPL)).T,
             "bias": np.zeros((self.NPL, self.HiddenDim)),
@@ -110,25 +112,46 @@ class FullyConnected(NN):
         x_initial = x_initial.reshape(self.inputDim,1)
         
         self.z[:,0:1,sample_no] = self.parameters["weights_in"] @ x_initial + self.parameters["input_bias"]
-        self.a[:,0:1,sample_no] = self.parameters["weights_in"] @ x_initial + self.parameters["input_bias"]
-        
+        #self.a[:,0:1,sample_no] = self.parameters["weights_in"] @ x_initial + self.parameters["input_bias"]
+        self.a[:,0:1,sample_no] = self.activationFunc(self.z[:,0:1,sample_no],derivative=False)
         for i in range(self.HiddenDim):
-            self.z[:,i+1,sample_no] = self.parameters["weights"][:, :, i] @ self.a[:, i,sample_no] +self.parameters["bias"][:, i-1]
-            self.a[:,i+1,sample_no] = self.activationFunc(self.z[:,i,sample_no],derivative=False)
+            self.z[:,i+1,sample_no] = self.parameters["weights"][:, :, i] @ self.a[:, i,sample_no] #+self.parameters["bias"][:, i-1]
+            self.a[:,i+1,sample_no] = self.activationFunc(self.z[:,i+1,sample_no],derivative=False)
         
         
-        out = self.parameters["weights_out"] @ self.a[:,self.HiddenDim,sample_no].reshape(self.NPL,1) +self.parameters["output_bias"]
+        out = self.parameters["weights_out"] @ self.a[:,self.HiddenDim,sample_no].reshape(self.NPL,1) #+self.parameters["output_bias"]
         if not self.classifier:
             return out
-        self.z_out[:,sample_no] = out.flatten()
-        return self.softmax(out,derivative=False)
+        
+        self.z_out[:,sample_no] = out.squeeze()
+        #print("regular out shape",out.shape)
+        
+        return self.softmax(out.T,derivative=False).T
 
     def forward(self,x_minibatch):
+        if self.use_tensors:
+            return self.forward_tensors(x_minibatch)
         y_out = np.zeros((self.minibatch_sz,self.outputDim))
         for i,x in enumerate(x_minibatch):
             y_out[i,:] = self.forward_sample(x,sample_no=i).flatten()
         return y_out
-    
+    def forward_tensors(self,x_minibatch):
+       
+        self.z[:,0:1,:] = np.tensordot(self.parameters["weights_in"][:,np.newaxis,:], x_minibatch.T ,axes=1) + self.parameters["input_bias"][:,np.newaxis]
+        self.a[:,0:1,:] = self.activationFunc(self.z[:,0:1,:],derivative=False)
+
+        for i in range(self.HiddenDim):
+            self.z[:,i+1,:] = np.tensordot(self.parameters["weights"][:, :, i], self.a[:, i,:],axes=1) #+self.parameters["bias"][:, i-1,np.newaxis]
+            self.a[:,i+1,:] = self.activationFunc(self.z[:,i+1,:],derivative=False)
+        self.z_out = np.tensordot(self.parameters["weights_out"][:,np.newaxis,:], self.a[:,self.HiddenDim,:],axes=1) #+self.parameters["output_bias"][:,np.newaxis]
+        self.z_out = self.z_out.squeeze()
+        
+        if not self.classifier:
+            return self.activationFunc(self.z_out,derivative=False)
+        #print(self.z_out.shape)
+       # print(self.softmax(self.z_out.T,derivative=False)[0])
+        return self.softmax(self.z_out.T,derivative=False).T
+        
 
 
     def clip_gradients(self, threshold=3,clip_start=3000,print_if_clipped= False):
@@ -177,15 +200,21 @@ class FullyConnected(NN):
             value = self.gradients_sample[key]
             self.gradients_sample[key] = np.zeros_like(value)
         
-    def gradient(self,ypred,yactual,xactual):
-
-        def grad_sample(self,ypred_sample,yactual_sample,sample_no,xinput_sample):
+    def gradient(self,ypred,yactual,xactual): 
+        if self.use_tensors:
+            self.grad_tensor(ypred,yactual,xactual)
+            return
+        for sample_num in range(len(yactual)):
+            #print(ypred[sample_num].shape,yactual[sample_num].shape)
+            self.grad_sample(ypred[sample_num],yactual[sample_num],sample_num,xactual[sample_num])
+            self.updateSampleWeights()
+        self.zero_grad_samples()
+    def grad_sample(self,ypred_sample,yactual_sample,sample_no,xinput_sample):
             if not self.classifier:
                 output_error  = self.costFunc(ypred_sample,yactual_sample,derivative=True)
                 delta_prev = (np.ones((1,self.outputDim))*output_error) ## for arbitrary output layers multiply by grad z
             else:
                 delta_prev = (ypred_sample-yactual_sample).reshape(self.outputDim,1).T
-            #print(delta_prev.shape,self.a[:,-1,sample_no].reshape(self.NPL,1).shape)
             self.gradients_sample["weights_out"] = self.a[:,-1,sample_no].reshape(self.NPL,1) @ delta_prev
             self.gradients_sample["output_bias"] = delta_prev
 
@@ -213,14 +242,42 @@ class FullyConnected(NN):
                 self.gradients_sample["weights_in"] = xinput_sample.reshape((len(xinput_sample),1)) @ delta
                 self.gradients_sample["input_bias"] = delta
 
-            
+    def grad_tensor(self,ypred,yactual,xactual):
+        if self.classifier:
+            delta = (ypred-yactual)
+        else:
+            raise NotImplementedError
+        self.gradients["weights_out"] = ((self.a[:,-1,:] @ delta).T)/self.minibatch_sz
+        delta = delta.T
+        self.gradients_sample["output_bias"] = delta/self.minibatch_sz
+        if self.HiddenDim >= 1:
+            for i in range(self.HiddenDim -1, -1, -1):
+                if i==self.HiddenDim-1:
+                    weights = self.parameters["weights_out"]
+                else:
+                    weights = self.parameters["weights"][:,:,i]
+                #print(weights.T.shape,delta.shape,self.z[:,i,:].shape)
+                delta = (weights.T @ delta)*self.activationFunc(self.z[:,i,:],derivative=True)
+                #print(delta.shape)
+                self.gradients["weights"][:,:,i] = (self.a[:,i,:] @ delta.T)/self.minibatch_sz
+                self.gradients["bias"][:,i] = np.mean(delta,axis=1)
 
+            delta = (self.parameters["weights"][:,:,0].T @ delta ) * self.activationFunc(self.z[:,0,:],derivative=True)
+            #print(xactual.shape,delta.shape)
+            self.gradients["weights_in"] = (delta @ xactual)/self.minibatch_sz
+            self.gradients["input_bias"] = np.mean(delta,axis=1)
             
-        for sample_num in range(len(yactual)):
-            grad_sample(self,ypred[sample_num],yactual[sample_num],sample_num,xactual[sample_num])
-            self.updateSampleWeights()
+        else:
+            raise NotImplementedError
+
+
         
-        self.zero_grad_samples()
+    
+
+
+
+           
+        
     def updateSampleWeights(self, include_bias = False):
         for key in self.gradients_sample.keys():
             gradient_sample = self.gradients_sample[key]
@@ -255,8 +312,10 @@ class FullyConnected(NN):
     
     def SGD(self,lr=.0001):
         for grad_name, grad_value in self.gradients.items():
-            if grad_name=="weights_out" or grad_name == "weights_in" or grad_name=="output_bias":
+            if grad_name=="output_bias": #or grad_name=="weights_out": #or grad_name=="weights_in":
                 grad_value = grad_value.T
+            if grad_name=="input_bias":
+                grad_value = grad_value[:,np.newaxis]
             #print(self.parameters[grad_name].shape,grad_name,grad_value.shape)
             self.parameters[grad_name] -= lr* grad_value
             
@@ -268,8 +327,10 @@ class FullyConnected(NN):
 
             # Compute gradients (assuming you have a gradients dictionary)
             gradient = self.gradients.get(param_name, np.zeros_like(param_value))
-            if param_name=="weights_out" or param_name=="weights_in" or param_name=="output_bias":
+            if param_name=="output_bias":
                 gradient = gradient.T
+            if param_name == "input_bias":
+                gradient = gradient[:,np.newaxis]
 
             # Update moments
             m = beta1 * m + (1 - beta1) * gradient
@@ -280,7 +341,7 @@ class FullyConnected(NN):
             v_hat = v / (1 - beta2)
 
             # Update parameters
-            
+            #print(param_name)
             self.parameters[param_name] -= lr * m_hat / (np.sqrt(v_hat) + epsilon)
 
             # Update ADAM variables
@@ -347,11 +408,8 @@ class FullyConnected(NN):
         return sigmoid_x * (1 + x * (1 - sigmoid_x))
     @staticmethod
     def softmax(x, derivative=False):
-        e_x = np.exp(x - np.max(x)) 
-        if not derivative:
-            return e_x / e_x.sum()
-        s = (e_x/e_x.sum()).reshape(-1, 1)
-        return np.diagflat(s) - np.dot(s, s.T)
+        e_x = np.exp(x - np.max(x,axis=1)[:,np.newaxis]) 
+        return e_x / e_x.sum(axis=1)[:,np.newaxis]
     @staticmethod
     def gelu(x, derivative=False):
         if not derivative:
