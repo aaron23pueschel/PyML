@@ -7,7 +7,7 @@ class NN(object):
         self.name = name
 
 class FullyConnected(NN):
-    def __init__(self,inputDim,outputDim,NPL,HiddenDim,minibatch_sz, activation_fcn="SiLU",cost_func="MSE", optimizer="SGD",classifier=False,dtype_ = np.float32, use_tensors=True):
+    def __init__(self,inputDim,outputDim,NPL,HiddenDim,minibatch_sz, activation_fcn="SiLU",cost_func="MSE", optimizer="SGD",classifier=False,dtype_ = np.float32, use_tensors=True,cost_function = "CrossEntropyLoss"):
         super().__init__()
         self.inputDim = inputDim
         self.outputDim = outputDim
@@ -29,8 +29,10 @@ class FullyConnected(NN):
         self.init_alg_params()
         self.init_gradient_clipping()
         
-        self.costFunc = self.cross_entropy_loss
-        self.mse_history = []
+        self.init_costFunc(cost_func)
+        self.loss_history = []
+        self.train_validation =[]
+        self.test_validation = []
 
     def init_gradients(self):
         self.gradients = {
@@ -107,25 +109,22 @@ class FullyConnected(NN):
             self.activationFunc = self.gelu
         else:
             raise RuntimeError("Unspecified activation function")
-    
+    def init_costFunc(self,loss_function):
+        if loss_function=="CrossEntropyLoss":
+            self.costFunc = self.cross_entropy_loss
+
     def forward_sample(self,x_initial,sample_no): 
         x_initial = x_initial.reshape(self.inputDim,1)
         
         self.z[:,0:1,sample_no] = self.parameters["weights_in"] @ x_initial + self.parameters["input_bias"]
-        #self.a[:,0:1,sample_no] = self.parameters["weights_in"] @ x_initial + self.parameters["input_bias"]
         self.a[:,0:1,sample_no] = self.activationFunc(self.z[:,0:1,sample_no],derivative=False)
         for i in range(self.HiddenDim):
             self.z[:,i+1,sample_no] = self.parameters["weights"][:, :, i] @ self.a[:, i,sample_no] #+self.parameters["bias"][:, i-1]
             self.a[:,i+1,sample_no] = self.activationFunc(self.z[:,i+1,sample_no],derivative=False)
-        
-        
         out = self.parameters["weights_out"] @ self.a[:,self.HiddenDim,sample_no].reshape(self.NPL,1) #+self.parameters["output_bias"]
         if not self.classifier:
             return out
-        
         self.z_out[:,sample_no] = out.squeeze()
-        #print("regular out shape",out.shape)
-        
         return self.softmax(out.T,derivative=False).T
 
     def forward(self,x_minibatch):
@@ -135,8 +134,10 @@ class FullyConnected(NN):
         for i,x in enumerate(x_minibatch):
             y_out[i,:] = self.forward_sample(x,sample_no=i).flatten()
         return y_out
+    
+
+
     def forward_tensors(self,x_minibatch):
-       
         self.z[:,0:1,:] = np.tensordot(self.parameters["weights_in"][:,np.newaxis,:], x_minibatch.T ,axes=1) + self.parameters["input_bias"][:,np.newaxis]
         self.a[:,0:1,:] = self.activationFunc(self.z[:,0:1,:],derivative=False)
 
@@ -148,8 +149,7 @@ class FullyConnected(NN):
         
         if not self.classifier:
             return self.activationFunc(self.z_out,derivative=False)
-        #print(self.z_out.shape)
-       # print(self.softmax(self.z_out.T,derivative=False)[0])
+
         return self.softmax(self.z_out.T,derivative=False).T
         
 
@@ -166,7 +166,7 @@ class FullyConnected(NN):
             print_flag = False
             if key !="bias" and key !="weights":
                 norm = np.linalg.norm(self.gradients[key])
-                #print(key,norm)
+
                 if norm > self.get_clip_mean(key) + threshold* self.get_clip_stddev(key):
                     self.gradients[key] = self.get_clip_mean(key)*(self.gradients[key]/norm)
                     print_flag = True
@@ -179,7 +179,7 @@ class FullyConnected(NN):
                         print_flag = True
             else:
                 for i in range(self.HiddenDim):
-                    #print(key,norm)
+
                     norm = np.linalg.norm(self.gradients[key][:,:,i],"fro")
                     if norm > self.get_clip_mean(key)[i] + threshold* self.get_clip_stddev(key)[i]:
                         self.gradients[key][:,:,i] = self.get_clip_mean(key)[i]*(self.gradients[key][:,:,i]/norm)
@@ -205,10 +205,10 @@ class FullyConnected(NN):
             self.grad_tensor(ypred,yactual,xactual)
             return
         for sample_num in range(len(yactual)):
-            #print(ypred[sample_num].shape,yactual[sample_num].shape)
             self.grad_sample(ypred[sample_num],yactual[sample_num],sample_num,xactual[sample_num])
             self.updateSampleWeights()
         self.zero_grad_samples()
+
     def grad_sample(self,ypred_sample,yactual_sample,sample_no,xinput_sample):
             if not self.classifier:
                 output_error  = self.costFunc(ypred_sample,yactual_sample,derivative=True)
@@ -256,14 +256,11 @@ class FullyConnected(NN):
                     weights = self.parameters["weights_out"]
                 else:
                     weights = self.parameters["weights"][:,:,i]
-                #print(weights.T.shape,delta.shape,self.z[:,i,:].shape)
                 delta = (weights.T @ delta)*self.activationFunc(self.z[:,i,:],derivative=True)
-                #print(delta.shape)
                 self.gradients["weights"][:,:,i] = (self.a[:,i,:] @ delta.T)/self.minibatch_sz
                 self.gradients["bias"][:,i] = np.mean(delta,axis=1)
 
             delta = (self.parameters["weights"][:,:,0].T @ delta ) * self.activationFunc(self.z[:,0,:],derivative=True)
-            #print(xactual.shape,delta.shape)
             self.gradients["weights_in"] = (delta @ xactual)/self.minibatch_sz
             self.gradients["input_bias"] = np.mean(delta,axis=1)
             
@@ -364,16 +361,10 @@ class FullyConnected(NN):
     def cross_entropy_loss(y_pred, y_actual, epsilon=1e-15, derivative=False):
 
         y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
-
-        # Calculate cross-entropy loss
         loss = -np.sum(y_actual * np.log(y_pred)) / len(y_actual)
-
         if not derivative:
             return loss
-
-        # Calculate the gradient of the cross-entropy loss
         gradient = (y_pred - y_actual) / (y_pred * (1 - y_pred) * len(y_actual))
-
         return gradient
 
 
