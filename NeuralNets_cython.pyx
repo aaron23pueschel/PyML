@@ -1,3 +1,8 @@
+
+## TODO 
+# Update this file to the current version
+# will need this file for CUDA and C++ functions
+
 import numpy as np
 import matplotlib.pyplot as plt
 cimport numpy as np

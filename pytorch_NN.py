@@ -1,6 +1,7 @@
 
 ## Aaron Pueschel
-## Final Project Optimization
+## "Final Project Optimization" (DEPRECATED, now only using to debug/validate current model)
+## as well as use the dataloader
 #############################################
 
 ## Imports: make sure you have Torch, numpy, matplotlib
