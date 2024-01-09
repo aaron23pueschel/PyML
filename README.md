@@ -5,7 +5,7 @@ Project Duration: 12/20/2023 - 01/09/2024
 
 ## Overview
 
-Welcome to my Fully Connected Neural Network project! This project marks the beginning of my journey into Machine Learning using Artificial Neural Networks. I hope to use this project as a tool for learning all the nuances of the mathematics behind my favorite ML libraries (PyTorch is mine, and this project is based on it). I also hope to add some functionality that will dive into other subjects that are often used in conjuction with large scale data analysis (More on this later)
+Welcome to my Fully Connected Neural Network project! This project marks the beginning of my journey into Machine Learning using Artificial Neural Networks. I hope to use this project as a tool for learning all the nuances and mathematics behind my favorite ML libraries (PyTorch is mine, and this project is based on it). I also hope to add some functionality that will dive into other subjects that are often used in conjuction with large scale data analysis (More on this later)
 
 ## Motivation
 
@@ -36,5 +36,5 @@ Feel free to reach out if you have any questions or simply want to discuss the p
 - pickle
 - scikit-learn / sklearn
 
-My current implementationackles the multi-class classification problem using the Minst dataset. While not intended as a tutorial, please see the file labled `FullyConnectedMinst.ipynb`. 
+My current implementation tackles the multi-class classification problem using the Minst dataset. While not intended as a tutorial, please see the file labled `FullyConnectedMinst.ipynb`. 
 
