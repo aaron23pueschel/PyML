@@ -4,3 +4,12 @@
 mnist_train.csv
 fashion-mnist_train.csv
 fashion-mnist_test.csv
+mnist_test.csv
+checkpoints/epoch0.pkl
+checkpoints/epoch1.pkl
+checkpoints/epoch5.pkl
+checkpoints/epoch10.pkl
+checkpoints/epoch15.pkl
+checkpoints/epoch20.pkl
+checkpoints/epoch25.pkl
+checkpoints/epoch30.pkl
